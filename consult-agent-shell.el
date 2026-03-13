@@ -30,6 +30,30 @@
 (require 'consult)
 (require 'agent-shell)
 
+(defgroup consult-agent-shell nil
+  "Consult interface for agent-shell."
+  :group 'consult
+  :group 'agent-shell)
+
+(defcustom consult-agent-shell-buffer-name-format "%s @ (%s)"
+  "Format string for new agent-shell buffer names.
+The first %s is replaced by the user-entered name, and the second
+%s is replaced by the project name."
+  :type 'string
+  :group 'consult-agent-shell)
+
+(defun consult-agent-shell--format-buffer-name (name)
+  "Format the agent-shell buffer name for NAME.
+Uses `consult-agent-shell-buffer-name-format` and project information."
+  (let ((project-name (or (when (fboundp 'project-name)
+                            (when-let ((proj (project-current)))
+                              (project-name proj)))
+                          (file-name-nondirectory
+                           (string-remove-suffix "/" default-directory)))))
+    (condition-case nil
+        (format consult-agent-shell-buffer-name-format name project-name)
+      (error (format consult-agent-shell-buffer-name-format name)))))
+
 (defun consult-agent-shell--annotate (name)
   "Return a status annotation string for the agent-shell buffer named NAME."
   (when-let ((buf (get-buffer name)))
@@ -60,7 +84,9 @@ With prefix ARG, open in other window."
       (when existing-buffer (kill-buffer existing-buffer))
       (setq buffer (agent-shell-new-shell))
       (unless (string-empty-p selected)
-        (shell-maker-set-buffer-name buffer selected)))
+        (shell-maker-set-buffer-name
+         buffer
+         (consult-agent-shell--format-buffer-name selected))))
     (if arg
         (switch-to-buffer-other-window buffer)
       (switch-to-buffer buffer))))
