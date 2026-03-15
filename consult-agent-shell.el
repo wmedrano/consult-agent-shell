@@ -45,11 +45,10 @@ The first %s is replaced by the user-entered name, and the second
 (defun consult-agent-shell--format-buffer-name (name)
   "Format the agent-shell buffer name for NAME.
 Uses `consult-agent-shell-buffer-name-format` and project information."
-  (let ((project-name (or (when (fboundp 'project-name)
-                            (when-let ((proj (project-current)))
-                              (project-name proj)))
-                          (file-name-nondirectory
-                           (string-remove-suffix "/" default-directory)))))
+  (let* ((project      (and (fboundp 'project-current) (project-current)))
+         (project-name (if project (project-name project)
+                         (file-name-nondirectory
+                          (string-remove-suffix "/" default-directory)))))
     (condition-case nil
         (format consult-agent-shell-buffer-name-format name project-name)
       (error (format consult-agent-shell-buffer-name-format name)))))
@@ -58,45 +57,86 @@ Uses `consult-agent-shell-buffer-name-format` and project information."
   "Return a status annotation string for the agent-shell buffer named NAME."
   (when-let ((buf (get-buffer name)))
     (with-current-buffer buf
-      (if (shell-maker-busy) " [busy]" " [idle]"))))
+      (let ((text (if (shell-maker-busy) " [busy]" " [idle]")))
+        (propertize text 'face (if (shell-maker-busy)
+                                   'warning
+                                 'success))))))
 
 ;;;###autoload
-(defun consult-agent-shell-switch (&optional arg)
+(defun consult-agent-shell-switch ()
   "Switch to an agent-shell buffer, with live preview.
 If the entered name does not match an existing buffer, a new
-agent-shell is created and named accordingly.
-With prefix ARG, open in other window."
-  (interactive "P")
+agent-shell is created and named accordingly."
+  (interactive)
   (let* ((agent-buffers (agent-shell-buffers))
+         (target-window (consult-agent-shell--find-agent-shell-window))
          (buffer-names (mapcar #'buffer-name agent-buffers))
          (selected (consult--read
                     buffer-names
                     :prompt "Agent Shell: "
                     :require-match nil
-                    :state (consult--buffer-state)
+                    :state (consult-agent-shell--buffer-state target-window)
                     :category 'consult-agent-shell
                     :annotate #'consult-agent-shell--annotate))
          (existing-buffer (get-buffer selected))
-         (buffer (car (memq existing-buffer agent-buffers))))
+         (buffer (car
+                  (memq existing-buffer agent-buffers))))
+    ;; Create a new window
     (unless buffer
-      (when (and existing-buffer (> (buffer-size existing-buffer) 0))
-        (user-error "Buffer %S already exists and is not an agent-shell" selected))
-      (when existing-buffer (kill-buffer existing-buffer))
+      (when existing-buffer
+        (unless (= (buffer-size existing-buffer) 0)
+          (user-error "Buffer %S already exists and is not an agent-shell" selected))
+        (kill-buffer-existing-buffer))
       (setq buffer (agent-shell-new-shell))
       (unless (string-empty-p selected)
         (shell-maker-set-buffer-name
          buffer
          (consult-agent-shell--format-buffer-name selected))))
-    (if arg
-        (switch-to-buffer-other-window buffer)
-      (switch-to-buffer buffer))))
+    (when target-window (select-window target-window))
+    (switch-to-buffer buffer)))
+
+(defun consult-agent-shell--find-agent-shell-window ()
+  "Return a window displaying an agent-shell buffer, or nil."
+  (cl-loop for win in (window-list)
+           when (with-current-buffer (window-buffer win)
+                  (derived-mode-p 'agent-shell-mode))
+           return win))
+
+(defun consult-agent-shell--buffer-state (target-window)
+  "State function for agent-shell buffer selection with window-aware preview.
+Previews in an existing agent-shell window if one is visible, otherwise
+falls back to the original window."
+  (let* ((preview-win (or target-window
+                          (consult--original-window)))
+         (orig-buf (window-buffer preview-win))
+         (orig-prev (copy-sequence (window-prev-buffers preview-win)))
+         (orig-next (copy-sequence (window-next-buffers preview-win)))
+         (orig-bl (copy-sequence (frame-parameter nil 'buffer-list)))
+         (orig-bbl (copy-sequence (frame-parameter nil 'buried-buffer-list))))
+    (lambda (action cand)
+      (pcase action
+        ('return
+         (set-frame-parameter nil 'buffer-list orig-bl)
+         (set-frame-parameter nil 'buried-buffer-list orig-bbl))
+        ('exit
+         (set-window-prev-buffers preview-win orig-prev)
+         (set-window-next-buffers preview-win orig-next))
+        ('preview
+         (cl-letf* (((symbol-function #'display-buffer-in-tab) #'ignore)
+                    ((symbol-function #'display-buffer-in-new-tab) #'ignore))
+           (let ((buf (or (and cand (get-buffer cand)) orig-buf)))
+             (when (and (window-live-p preview-win) (buffer-live-p buf)
+                        (not (buffer-match-p consult-preview-excluded-buffers buf)))
+               (with-selected-window preview-win
+                 (switch-to-buffer buf 'norecord))))))))))
 
 ;;;###autoload
-(defun consult-agent-shell-send-region (&optional arg)
+(defun consult-agent-shell-send-region ()
   "Send region to an agent-shell buffer, selected with live preview.
 With prefix ARG, open the shell in other window after sending."
-  (interactive "P")
-  (let* ((region-text (agent-shell--get-region-context
+  (interactive)
+  (let* ((target-window (consult-agent-shell--find-agent-shell-window))
+         (region-text (agent-shell--get-region-context
                        :deactivate t
                        :no-error nil))
          (buffer-names (mapcar #'buffer-name
@@ -106,15 +146,15 @@ With prefix ARG, open the shell in other window after sending."
                     buffer-names
                     :prompt "Send region to Agent Shell: "
                     :require-match t
-                    :state (consult--buffer-state)
-                    :category 'buffer))
+                    :state (consult-agent-shell--buffer-state target-window)
+                    :category 'consult-agent-shell
+                    :annotate #'consult-agent-shell--annotate))
          (buffer (get-buffer selected)))
     (agent-shell-insert
      :text region-text
      :shell-buffer buffer)
-    (if arg
-        (switch-to-buffer-other-window buffer)
-      (switch-to-buffer buffer))))
+    (when target-window (select-window target-window))
+    (switch-to-buffer buffer)))
 
 (provide 'consult-agent-shell)
 ;;; consult-agent-shell.el ends here
