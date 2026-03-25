@@ -132,8 +132,7 @@ falls back to the original window."
 
 ;;;###autoload
 (defun consult-agent-shell-send-region ()
-  "Send region to an agent-shell buffer, selected with live preview.
-With prefix ARG, open the shell in other window after sending."
+  "Send region to an agent-shell buffer, selected with live preview."
   (interactive)
   (let* ((target-window (consult-agent-shell--find-agent-shell-window))
          (region-text (agent-shell--get-region-context
