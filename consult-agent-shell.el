@@ -42,6 +42,17 @@ The first %s is replaced by the user-entered name, and the second
   :type 'string
   :group 'consult-agent-shell)
 
+(defcustom consult-agent-shell-kill-confirm 'when-busy
+  "When to require confirmation before killing agent-shell buffers.
+Possible values:
+- `always'  - Always prompt for confirmation
+- `when-busy' - Only prompt if any selected shell is busy (default)
+- `never'   - Never prompt, just kill"
+  :type '(choice (const always)
+                 (const when-busy)
+                 (const never))
+  :group 'consult-agent-shell)
+
 (defun consult-agent-shell--format-buffer-name (name)
   "Format the agent-shell buffer name for NAME.
 Uses `consult-agent-shell-buffer-name-format` and project information."
@@ -154,6 +165,49 @@ falls back to the original window."
      :shell-buffer buffer)
     (when target-window (select-window target-window))
     (switch-to-buffer buffer)))
+
+;;;###autoload
+(defun consult-agent-shell-kill ()
+  "Kill agent-shell buffers selected via consult.
+Confirmation behavior is determined by `consult-agent-shell-kill-confirm':
+- `always'  - Always prompt
+- `when-busy' - Only prompt if shells are busy (default)
+- `never'   - No prompt"
+  (interactive)
+  (let* ((agent-buffers (agent-shell-buffers))
+         (buffer-names (mapcar #'buffer-name agent-buffers))
+         (require-match (if (eq consult-agent-shell-kill-confirm 'never) nil t))
+         (selections (consult--read
+                      buffer-names
+                      :prompt "Kill agent shells: "
+                      :require-match require-match
+                      :category 'consult-agent-shell
+                      :annotate #'consult-agent-shell--annotate
+                      :multi-select t))
+         (buffers (mapcar #'get-buffer selections)))
+    (cond
+     ((null selections)
+      (user-error "No shells to kill"))
+     ((eq consult-agent-shell-kill-confirm 'always)
+      (when (y-or-n-p (format "Kill %d agent shell(s)? "
+                              (length buffers)))
+        (dolist (buf buffers)
+          (when buf (kill-buffer buf)))))
+     ((eq consult-agent-shell-kill-confirm 'when-busy)
+      (let* ((busy-shells (cl-loop for buf in buffers
+                                   when (and buf (with-current-buffer buf
+                                                   (shell-maker-busy)))
+                                   collect (buffer-name buf)))
+        (if busy-shells
+            (when (y-or-n-p (format "Killing busy shells: %s. Continue? "
+                                    (string-join busy-shells ", ")))
+              (dolist (buf buffers)
+                (when buf (kill-buffer buf))))
+          (dolist (buf buffers)
+            (when buf (kill-buffer buf))))))
+     (t
+      (dolist (buf buffers)
+        (when buf (kill-buffer buf))))))))
 
 (provide 'consult-agent-shell)
 ;;; consult-agent-shell.el ends here
