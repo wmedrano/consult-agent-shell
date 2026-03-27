@@ -70,8 +70,25 @@ Uses `consult-agent-shell-buffer-name-format` and project information."
     (with-current-buffer buf
       (let ((text (if (shell-maker-busy) " [busy]" " [idle]")))
         (propertize text 'face (if (shell-maker-busy)
-                                   'warning
-                                 'success))))))
+                                    'warning
+                                  'success))))))
+
+(defun consult-agent-shell--create-new-buffer (name target-window)
+  "Create a new agent-shell buffer named NAME.
+If a non-agent-shell buffer with that name exists and is empty,
+it is killed first.  TARGET-WINDOW is selected before creating
+if non-nil.  Returns the new buffer."
+  (when-let ((existing (get-buffer name)))
+    (unless (= (buffer-size existing) 0)
+      (user-error "Buffer %S already exists and is not an agent-shell" name))
+    (kill-buffer existing))
+  (with-selected-window (or target-window (selected-window))
+    (let ((buffer (agent-shell-new-shell)))
+      (unless (string-empty-p name)
+        (shell-maker-set-buffer-name
+         buffer
+         (consult-agent-shell--format-buffer-name name)))
+      buffer)))
 
 ;;;###autoload
 (defun consult-agent-shell-switch ()
@@ -94,15 +111,8 @@ agent-shell is created and named accordingly."
                   (memq existing-buffer agent-buffers))))
     ;; Create a new window
     (unless buffer
-      (when existing-buffer
-        (unless (= (buffer-size existing-buffer) 0)
-          (user-error "Buffer %S already exists and is not an agent-shell" selected))
-        (kill-buffer-existing-buffer))
-      (setq buffer (agent-shell-new-shell))
-      (unless (string-empty-p selected)
-        (shell-maker-set-buffer-name
-         buffer
-         (consult-agent-shell--format-buffer-name selected))))
+      (setq buffer (consult-agent-shell--create-new-buffer
+                    selected target-window)))
     (when target-window (select-window target-window))
     (switch-to-buffer buffer)))
 
