@@ -91,10 +91,11 @@ if non-nil.  Returns the new buffer."
       buffer)))
 
 ;;;###autoload
-(defun consult-agent-shell-switch ()
+(defun consult-agent-shell-switch (&optional no-switch)
   "Switch to an agent-shell buffer, with live preview.
 If the entered name does not match an existing buffer, a new
-agent-shell is created and named accordingly."
+agent-shell is created and named accordingly.
+If NO-SWITCH is non-nil, return the buffer without switching to it."
   (interactive)
   (let* ((agent-buffers (agent-shell-buffers))
          (target-window (consult-agent-shell--find-agent-shell-window))
@@ -113,8 +114,10 @@ agent-shell is created and named accordingly."
     (unless buffer
       (setq buffer (consult-agent-shell--create-new-buffer
                     selected target-window)))
-    (when target-window (select-window target-window))
-    (switch-to-buffer buffer)))
+    (unless no-switch
+      (when target-window (select-window target-window))
+      (switch-to-buffer buffer))
+    buffer))
 
 (defun consult-agent-shell--find-agent-shell-window ()
   "Return a window displaying an agent-shell buffer, or nil."
@@ -153,27 +156,19 @@ falls back to the original window."
 
 ;;;###autoload
 (defun consult-agent-shell-send-region ()
-  "Send region to an agent-shell buffer, selected with live preview."
+  "Send region to an agent-shell buffer, selected with live preview.
+If the entered name does not match an existing buffer, a new
+agent-shell is created and named accordingly."
   (interactive)
-  (let* ((target-window (consult-agent-shell--find-agent-shell-window))
-         (region-text (agent-shell--get-region-context
+  (let* ((region-text (agent-shell--get-region-context
                        :deactivate t
                        :no-error nil))
-         (buffer-names (mapcar #'buffer-name
-                               (or (agent-shell-buffers)
-                                   (user-error "No agent shells available"))))
-         (selected (consult--read
-                    buffer-names
-                    :prompt "Send region to Agent Shell: "
-                    :require-match t
-                    :state (consult-agent-shell--buffer-state target-window)
-                    :category 'consult-agent-shell
-                    :annotate #'consult-agent-shell--annotate))
-         (buffer (get-buffer selected)))
+         (buffer (consult-agent-shell-switch t)))
     (agent-shell-insert
      :text region-text
      :shell-buffer buffer)
-    (when target-window (select-window target-window))
+    (when-let ((target-window (consult-agent-shell--find-agent-shell-window)))
+      (select-window target-window))
     (switch-to-buffer buffer)))
 
 ;;;###autoload
